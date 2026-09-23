@@ -11,6 +11,23 @@ import { navigate } from '../router'
 import { ViewSvg, CheckRuler } from '../components/ViewSvg'
 import { ParamForm } from '../components/ParamForm'
 import { DEFAULT_FIT_TABLE, WOOD_LABEL, loadFitTable, saveFitTable, type FitTable } from '../lib/fit'
+import { SCALES, scaleMm } from '../lib/scale'
+import type { Scale } from '../types'
+
+/** 出图比例选择（编辑器/打印页共用）；尺寸标注始终写实际尺寸 */
+function ScaleSelect({ scale, onChange }: { scale: Scale; onChange: (s: Scale) => void }) {
+  return (
+    <label className="scale-select">
+      出图比例
+      <select data-testid="scale-select" value={scale} onChange={(e) => onChange(e.target.value as Scale)}>
+        {SCALES.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+      <span className="note">尺寸标注一律为实际尺寸</span>
+    </label>
+  )
+}
 
 export function EditorPage({ id }: { id: string }) {
   const [plan, setPlan] = useState<Drawing | undefined>(() => getPlan(id))
@@ -50,6 +67,16 @@ export function EditorPage({ id }: { id: string }) {
   const updateKind = (k: JointKind) => {
     setPlan((prev) => (prev ? { ...prev, joints: [{ ...prev.joints[0], kind: k }], updatedAt: Date.now() } : prev))
     setDirty(true)
+  }
+
+  // 比例是出图设置：改完即存（打印页直接读方案库里的这一档），不算参数脏状态
+  const updateScale = (s: Scale) => {
+    setPlan((prev) => {
+      if (!prev) return prev
+      const next = { ...prev, scale: s }
+      upsertPlan(next)
+      return next
+    })
   }
 
   const save = () => {
@@ -101,6 +128,9 @@ export function EditorPage({ id }: { id: string }) {
         </aside>
 
         <main className="col-views">
+          <div className="views-toolbar">
+            <ScaleSelect scale={plan.scale} onChange={updateScale} />
+          </div>
           {computed && computed.result.warnings.length > 0 && (
             <div className="warnings" role="alert" data-testid="warnings">
               {computed.result.warnings.map((w, i) => (
@@ -109,8 +139,18 @@ export function EditorPage({ id }: { id: string }) {
             </div>
           )}
           <div className="views" data-testid="views">
-            {computed?.views.map((vm) => <ViewSvg key={vm.id} vm={vm} />)}
+            {computed?.views.map((vm) => (
+              <ViewSvg key={vm.id} vm={vm} scale={plan.scale} />
+            ))}
           </div>
+          {plan.scale !== '1:1' && (
+            <div className="editor-ruler" data-testid="editor-ruler">
+              <p className="note" data-testid="scale-hint">
+                当前 {plan.scale}：视图已按比例缩小，标注数字仍是实际尺寸；图纸角上有比例标，下方是校验尺。
+              </p>
+              <CheckRuler scale={plan.scale} />
+            </div>
+          )}
           <p className="note" data-testid="recalc-ms">重算耗时 {recalcMs.current.toFixed(1)}ms（要求 &lt;100ms）</p>
           {computed && joint.kind.startsWith('dovetail') && computed.result.dovetail && (
             <ToothTable dt={computed.result.dovetail} />
@@ -254,36 +294,56 @@ export function FitTableEditor() {
 }
 
 export function PrintPage({ id }: { id: string }) {
-  const plan = getPlan(id)
+  const [plan, setPlan] = useState<Drawing | undefined>(() => getPlan(id))
   if (!plan) return <div className="page"><p className="error">方案不存在</p></div>
   const joint = plan.joints[0]
   const r = computeJoint(joint)
   const views = buildViews(joint, r)
+  const scale = plan.scale
+
+  // 打印页改比例同样写回方案：下次打开（编辑器/打印页）还是这一档
+  const changeScale = (s: Scale) => {
+    const next = { ...plan, scale: s }
+    upsertPlan(next)
+    setPlan(next)
+  }
+
+  const printedWidth = (contentW: number) => scaleMm(contentW, scale) + 48
+
   return (
     <div className="page print-page" data-testid="print-page">
       <div className="print-toolbar no-print">
+        <ScaleSelect scale={scale} onChange={changeScale} />
         <button className="btn btn-primary" data-testid="do-print" onClick={() => window.print()}>
-          打印（1:1）
+          {scale === '1:1' ? '打印（1:1）' : `打印（${scale}）`}
         </button>
         <button className="btn" onClick={() => navigate(`/plan/${plan.id}`)}>返回编辑</button>
-        <span className="note">打印前关闭「适应页面/缩放」，选择 A4、100% 缩放</span>
+        <span className="note">
+          {scale === '1:1'
+            ? '打印前关闭「适应页面/缩放」，选择 A4、100% 缩放'
+            : `打印时仍按 100% 输出（勿选适应页面）；出图比例 ${scale}，用页内校验尺核对，标注数字为实际尺寸`}
+        </span>
       </div>
       <h1 className="print-title">{plan.title}</h1>
       <section className="print-section">
-        <h2>校验尺</h2>
+        <h2>图纸视图（{scale}）</h2>
         {views.map((vm) => (
-          <div key={vm.id} className="print-view-block">
-            <ViewSvg vm={vm} widthMm={vm.contentW + 48} />
+          <div key={vm.id} className="print-view-block print-scaled-block">
+            <ViewSvg vm={vm} scale={scale} widthMm={printedWidth(vm.contentW)} />
           </div>
         ))}
         <div className="print-view-block">
-          <CheckRuler />
+          <CheckRuler scale={scale} />
         </div>
       </section>
       <section className="print-section">
-        <h2>1:1 模板页（剪下贴在木料上描线）</h2>
+        <h2>
+          {scale === '1:1'
+            ? '1:1 模板页（剪下贴在木料上描线）'
+            : `${scale} 出图页（图框按比例缩，标注为实际尺寸；比例标在图角，校验尺见上方）`}
+        </h2>
         <div className="print-view-block">
-          {views[0] && <ViewSvg vm={views[0]} widthMm={views[0].contentW + 48} />}
+          {views[0] && <ViewSvg vm={views[0]} scale={scale} widthMm={printedWidth(views[0].contentW)} />}
         </div>
       </section>
       <section className="print-section">

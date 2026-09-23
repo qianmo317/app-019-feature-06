@@ -4,8 +4,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HomePage } from '../../src/pages/HomePage'
 import { NewPlanPage } from '../../src/pages/NewPlanPage'
-import { EditorPage } from '../../src/pages/EditorPage'
-import { makePlan, upsertPlan } from '../../src/store/plans'
+import { EditorPage, PrintPage } from '../../src/pages/EditorPage'
+import { makePlan, upsertPlan, getPlan } from '../../src/store/plans'
 import type { JointKind, Params } from '../../src/types'
 
 beforeEach(() => {
@@ -94,6 +94,95 @@ describe('编辑器：参数改动即时重算 + 脏状态提示 + 齿宽表', (
   it('方案不存在 → 显示错误并可控', () => {
     render(<EditorPage id="nonexistent" />)
     expect(screen.getByText('方案不存在或已删除')).toBeInTheDocument()
+  })
+
+  it('切比例 → 视图 data-scale 变化、出现校验尺且选择即时存库（不产生参数脏条）', async () => {
+    const user = userEvent.setup()
+    const { id } = savedPlan()
+    render(<EditorPage id={id} />)
+    const select = screen.getByTestId('scale-select')
+    expect(select).toHaveValue('1:1')
+    // 初始 1:1：无比例徽标，屏幕上也不显示校验尺（打印页 1:1 才需要尺）
+    expect(document.querySelector('[data-view="front"]')!.getAttribute('data-scale')).toBe('1:1')
+    expect(screen.queryByTestId('check-ruler')).toBeNull()
+
+    await user.selectOptions(select, '1:2')
+    expect(select).toHaveValue('1:2')
+    const front = document.querySelector('[data-view="front"]')!
+    expect(front.getAttribute('data-scale')).toBe('1:2')
+    expect(front.querySelector('[data-testid="scale-badge"]')).toHaveTextContent('1:2')
+    expect(screen.getByTestId('check-ruler').getAttribute('data-scale')).toBe('1:2')
+    // 改比例不触发参数脏状态
+    expect(screen.queryByTestId('dirty-bar')).toBeNull()
+    // 已写回方案库
+    expect(getPlan(id)!.scale).toBe('1:2')
+  })
+
+  it('下次打开仍是上次那一档（localStorage 持久化）', () => {
+    const { id } = savedPlan()
+    upsertPlan({ ...getPlan(id)!, scale: '1:5' })
+    render(<EditorPage id={id} />)
+    expect(screen.getByTestId('scale-select')).toHaveValue('1:5')
+    expect(document.querySelector('[data-view="front"]')!.getAttribute('data-scale')).toBe('1:5')
+  })
+
+  it('旧数据缺 scale 字段 → 补 1:1 正常打开', () => {
+    const plan = savedPlan()
+    const raw = JSON.parse(localStorage.getItem('wjb.plans.v1')!) as typeof plan[]
+    delete (raw[0] as { scale?: string }).scale
+    localStorage.setItem('wjb.plans.v1', JSON.stringify(raw))
+    render(<EditorPage id={plan.id} />)
+    expect(screen.getByTestId('scale-select')).toHaveValue('1:1')
+    expect(document.querySelector('[data-view="front"]')!.getAttribute('data-scale')).toBe('1:1')
+  })
+})
+
+describe('打印页：按方案当前比例出图', () => {
+  const savedPlan = () => {
+    const plan = makePlan('dovetail', {
+      boardA: { thickness: 18, width: 200 },
+      boardB: { thickness: 18, width: 200 },
+      wood: 'hardwood',
+      fit: 'standard',
+      dovetail: { angleRatio: 8 },
+      kerfMm: 1.1,
+    })
+    upsertPlan(plan)
+    return plan
+  }
+
+  it('1:1：保留 100mm 校验尺与 1:1 模板页标题', () => {
+    const { id } = savedPlan()
+    render(<PrintPage id={id} />)
+    expect(screen.getByTestId('print-page')).toBeInTheDocument()
+    expect(screen.getByTestId('check-ruler')).toHaveTextContent('100mm')
+    expect(screen.getByText('1:1 模板页（剪下贴在木料上描线）')).toBeInTheDocument()
+    const svg = document.querySelector('[data-view="front"]')!
+    expect(svg.getAttribute('data-scale')).toBe('1:1')
+    // 打印物理宽度：1:1 时内容 200mm + 48mm padding
+    expect(svg.getAttribute('style')).toContain('248mm')
+  })
+
+  it('方案为 1:2：视图与校验尺按 1:2 出，页内可改比例并存库', async () => {
+    const user = userEvent.setup()
+    const plan = savedPlan()
+    upsertPlan({ ...plan, scale: '1:2' })
+    render(<PrintPage id={plan.id} />)
+    // 视图按比例缩：物理宽 = 200/2 + 48 = 148mm
+    const svg = document.querySelector('[data-view="front"]')!
+    expect(svg.getAttribute('data-scale')).toBe('1:2')
+    expect(svg.getAttribute('style')).toContain('148mm')
+    // 校验尺图上 50mm 实际代表 100mm
+    expect(screen.getByTestId('check-ruler')).toHaveTextContent('图上长 50mm')
+    expect(screen.getByText('图纸视图（1:2）')).toBeInTheDocument()
+    expect(svg.querySelector('[data-testid="scale-badge"]')).toHaveTextContent('1:2')
+
+    await user.selectOptions(screen.getByTestId('scale-select'), '1:5')
+    expect(document.querySelector('[data-view="front"]')!.getAttribute('data-scale')).toBe('1:5')
+    // 200/5 + 48 = 88mm
+    expect(document.querySelector('[data-view="front"]')!.getAttribute('style')).toContain('88mm')
+    expect(screen.getByTestId('check-ruler')).toHaveTextContent('图上长 20mm')
+    expect(getPlan(plan.id)!.scale).toBe('1:5')
   })
 })
 

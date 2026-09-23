@@ -86,13 +86,19 @@ input[type="number"] { width: 90px; text-align: right; }
 .editor-grid { display: grid; grid-template-columns: 300px 1fr 300px; gap: 16px; align-items: start; }
 @media (max-width: 1100px) { .editor-grid { grid-template-columns: 1fr; } }
 .col-views { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.views-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.scale-select { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.scale-select .note { font-weight: 400; }
 .views { display: flex; flex-wrap: wrap; gap: 12px; }
 .view-svg { background: #fff; border: 1px solid var(--line); max-width: 100%; height: auto; }
+.editor-ruler { margin-top: 12px; }
+.scale-badge-box { fill: #fff; stroke: var(--ink); stroke-width: 0.4; }
+.scale-badge-text { fill: var(--ink); font-size: 5px; font-weight: 700; }
 
-.ln-cut { stroke: var(--ink); stroke-width: 0.5; fill: none; }
-.ln-thin { stroke: var(--ink); stroke-width: 0.25; fill: none; }
-.ln-saw { stroke: var(--ink); stroke-width: 0.35; fill: none; stroke-dasharray: 2 1.2; }
-.ln-hidden { stroke: #888; stroke-width: 0.3; fill: none; stroke-dasharray: 1.5 1.5; }
+.ln-cut { stroke: var(--ink); stroke-width: calc(0.5 * var(--geo-sw, 1)); fill: none; }
+.ln-thin { stroke: var(--ink); stroke-width: calc(0.25 * var(--geo-sw, 1)); fill: none; }
+.ln-saw { stroke: var(--ink); stroke-width: calc(0.35 * var(--geo-sw, 1)); fill: none; stroke-dasharray: 2 1.2; }
+.ln-hidden { stroke: #888; stroke-width: calc(0.3 * var(--geo-sw, 1)); fill: none; stroke-dasharray: 1.5 1.5; }
 .ln-dim { stroke: var(--dim); stroke-width: 0.3; fill: none; }
 .dim-text { fill: var(--dim); font-size: 4.2px; }
 .view-text { fill: #555; font-size: 4px; }
