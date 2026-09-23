@@ -140,9 +140,27 @@ input[type="number"] { width: 90px; text-align: right; }
 .print-view-block { display: flex; justify-content: center; }
 .ruler-wrap { text-align: center; }
 
+/* 出图比例选择与比例校验 */
+.scale-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+.scale-bar select { width: auto; }
+.scale-panel {
+  display: flex; align-items: flex-start; justify-content: center;
+  background: #fff; border: 1px dashed var(--line); border-radius: 6px;
+  padding: 10px 14px; margin: 4px 0;
+}
+.scale-badge {
+  display: inline-block; background: var(--dim); color: #fff;
+  border-radius: 4px; padding: 1px 8px; font-size: 12px; font-weight: 600;
+}
+.scale-ruler { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.scale-ruler-head { display: flex; gap: 10px; align-items: center; margin: 0 0 4px; }
+.scale-ruler .note { font-size: 11px; }
+.view-svg[data-scale="1:2"], .view-svg[data-scale="1:5"] { max-height: 240mm; }
+
 @media print {
   .no-print { display: none !important; }
   body { background: #fff; }
   .page { max-width: none; padding: 0; }
   .print-section { page-break-inside: avoid; }
+  .scale-panel { border-style: solid; }
 }

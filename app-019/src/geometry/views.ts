@@ -1,6 +1,7 @@
 // 三视图几何引擎：同一套几何数据生成正视图/俯视图/侧视图，保证一致性（蓝图 §8）
 // 坐标系：局部坐标 mm，y 向下；渲染时整体加 padding
-import type { Joint, JointKind } from '../types'
+import type { Joint, JointKind, Scale } from '../types'
+import { SCALE_FACTOR } from '../types'
 import type { DovetailResult } from '../lib/dovetail'
 import type { TenonResult } from '../lib/tenon'
 import type { LapResult, DowelResult, PanelResult } from '../lib/joints'
@@ -297,6 +298,25 @@ function panelViews(p: Joint['params'], pn: PanelResult): ViewModel[] {
   side.lines.push({ x1: 0, y1: LJ - pn.slotDepth, x2: t, y2: LJ - pn.slotDepth, cls: 'hidden' })
   vdim(side, LJ - pn.slotDepth, LJ, -12, `槽深 ${fmtDrawing(pn.slotDepth)}`)
   return [front, top, side]
+}
+
+/**
+ * 按出图比例缩放视图：几何坐标整体乘系数，尺寸标注的 label 保持实际尺寸
+ * （标注写的是实际 mm，不是图上量出来的数）。
+ */
+export function scaleView(vm: ViewModel, scale: Scale): ViewModel {
+  const k = SCALE_FACTOR[scale]
+  if (k === 1) return vm
+  const s = (n: number) => n * k
+  return {
+    ...vm,
+    contentW: s(vm.contentW),
+    contentH: s(vm.contentH),
+    lines: vm.lines.map((l) => ({ ...l, x1: s(l.x1), y1: s(l.y1), x2: s(l.x2), y2: s(l.y2) })),
+    dims: vm.dims.map((d) => ({ ...d, from: s(d.from), to: s(d.to), at: s(d.at) })),
+    texts: vm.texts.map((t) => ({ ...t, x: s(t.x), y: s(t.y) })),
+    marks: vm.marks.map((m) => ({ ...m, x: s(m.x), y: s(m.y) })),
+  }
 }
 
 export function buildViews(joint: Joint, r: {

@@ -4,8 +4,8 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HomePage } from '../../src/pages/HomePage'
 import { NewPlanPage } from '../../src/pages/NewPlanPage'
-import { EditorPage } from '../../src/pages/EditorPage'
-import { makePlan, upsertPlan } from '../../src/store/plans'
+import { EditorPage, PrintPage } from '../../src/pages/EditorPage'
+import { makePlan, upsertPlan, getPlan } from '../../src/store/plans'
 import type { JointKind, Params } from '../../src/types'
 
 beforeEach(() => {
@@ -94,6 +94,90 @@ describe('编辑器：参数改动即时重算 + 脏状态提示 + 齿宽表', (
   it('方案不存在 → 显示错误并可控', () => {
     render(<EditorPage id="nonexistent" />)
     expect(screen.getByText('方案不存在或已删除')).toBeInTheDocument()
+  })
+
+  it('切换出图比例：出现比例徽标与比例校验尺，标注仍是实际尺寸；保存后持久化', async () => {
+    const user = userEvent.setup()
+    const { id } = savedPlan()
+    const { container, unmount } = render(<EditorPage id={id} />)
+    const scaleSel = screen.getByTestId('editor-scale')
+    expect(scaleSel).toHaveValue('1:1')
+    expect(screen.queryByTestId('scale-panel')).toBeNull()
+
+    await user.selectOptions(scaleSel, '1:2')
+    // 比例徽标与 1:2 校验尺出现
+    expect(screen.getByTestId('scale-badge')).toHaveTextContent('比例 1:2')
+    expect(screen.getByTestId('scale-ruler-1:2')).toBeInTheDocument()
+    // 视图带比例标记；板宽 200 的实际尺寸标注仍在
+    const front = container.querySelector('[data-view="front"]')!
+    expect(front.getAttribute('data-scale')).toBe('1:2')
+    expect(front.textContent).toContain('板宽 200')
+    // 改动未保存 → 脏条
+    expect(screen.getByTestId('dirty-bar')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('save-plan'))
+    expect(getPlan(id)!.scale).toBe('1:2')
+
+    // 重新打开：仍是 1:2
+    unmount()
+    render(<EditorPage id={id} />)
+    expect(screen.getByTestId('editor-scale')).toHaveValue('1:2')
+  })
+
+  it('切到 1:5 再回到 1:1：比例面板消失，恢复 1:1', async () => {
+    const user = userEvent.setup()
+    const { id } = savedPlan()
+    render(<EditorPage id={id} />)
+    await user.selectOptions(screen.getByTestId('editor-scale'), '1:5')
+    expect(screen.getByTestId('scale-ruler-1:5')).toBeInTheDocument()
+    await user.selectOptions(screen.getByTestId('editor-scale'), '1:1')
+    expect(screen.queryByTestId('scale-panel')).toBeNull()
+  })
+})
+
+describe('打印页：按当前比例出图 + 比例选择即时持久化', () => {
+  const savedPlan = () => {
+    const plan = makePlan('dovetail', {
+      boardA: { thickness: 18, width: 200 },
+      boardB: { thickness: 18, width: 200 },
+      wood: 'hardwood',
+      fit: 'standard',
+      dovetail: { angleRatio: 8 },
+      kerfMm: 1.1,
+    })
+    upsertPlan(plan)
+    return plan
+  }
+
+  it('默认 1:1：100mm 校验尺与 1:1 模板页保留', () => {
+    const { id } = savedPlan()
+    const { container } = render(<PrintPage id={id} />)
+    expect(screen.getByTestId('print-scale')).toHaveValue('1:1')
+    expect(screen.getByTestId('check-ruler')).toBeInTheDocument()
+    expect(screen.getByTestId('check-ruler')).toHaveTextContent('100mm')
+    expect(screen.getByText('1:1 模板页（剪下贴在木料上描线）')).toBeInTheDocument()
+    expect(screen.getByTestId('do-print')).toHaveTextContent('1:1')
+    const front = container.querySelector('[data-view="front"]')!
+    expect(front.getAttribute('data-scale')).toBe('1:1')
+  })
+
+  it('切到 1:2：按比例出图、显示比例校验尺、隐藏 1:1 模板页，并即时存库', async () => {
+    const user = userEvent.setup()
+    const { id } = savedPlan()
+    const { container } = render(<PrintPage id={id} />)
+    await user.selectOptions(screen.getByTestId('print-scale'), '1:2')
+
+    expect(screen.getByTestId('scale-ruler-1:2')).toBeInTheDocument()
+    expect(screen.getByTestId('scale-ruler-1:2')).toHaveTextContent('50mm')
+    expect(screen.queryByTestId('check-ruler')).toBeNull()
+    expect(screen.queryByText('1:1 模板页（剪下贴在木料上描线）')).toBeNull()
+    expect(screen.getByTestId('do-print')).toHaveTextContent('1:2')
+    const front = container.querySelector('[data-view="front"]')!
+    expect(front.getAttribute('data-scale')).toBe('1:2')
+    // 标注仍为实际尺寸
+    expect(front.textContent).toContain('板宽 200')
+    // 即时落库
+    expect(getPlan(id)!.scale).toBe('1:2')
   })
 })
 

@@ -123,12 +123,74 @@ test.describe('全流程：选类型 → 填尺寸 → 出三视图 → 打印 1
     await page.getByTestId('go-print').click()
 
     await expect(page.getByTestId('print-page')).toBeVisible()
+    await expect(page.getByTestId('print-scale')).toHaveValue('1:1')
     await expect(page.getByTestId('check-ruler')).toBeVisible()
     await expect(page.getByTestId('check-ruler')).toContainText('100mm')
     await expect(page.getByText('1:1 模板页')).toBeVisible()
     await page.getByTestId('do-print').click()
     const printed = await page.evaluate(() => (window as unknown as { __printed: boolean }).__printed)
     expect(printed).toBe(true)
+  })
+
+  test('编辑器切比例 1:5 → 保存 → 重新打开仍是 1:5；标注为实际尺寸、视图缩小、带比例校验尺', async ({ page }) => {
+    await goto(page, '/#/new')
+    await page.getByTestId('kind-dovetail').click()
+    await page.getByTestId('a-width').fill('600')
+    await page.getByTestId('create-plan').click()
+    await expect(page.getByTestId('editor-page')).toBeVisible()
+
+    const before = await page.locator('[data-view="front"]').evaluate((el) => {
+      const svg = el as SVGSVGElement
+      return { box: svg.getAttribute('viewBox') }
+    })
+
+    // 1:1 时无比例面板
+    await expect(page.getByTestId('scale-panel')).toHaveCount(0)
+    await page.getByTestId('editor-scale').selectOption('1:5')
+    await expect(page.getByTestId('scale-badge')).toContainText('比例 1:5')
+    await expect(page.getByTestId('scale-ruler-1:5')).toBeVisible()
+    await expect(page.locator('[data-view="front"]')).toHaveAttribute('data-scale', '1:5')
+
+    // 标注写实际尺寸 600，不是缩放后的 120
+    await expect(page.locator('[data-view="front"]')).toContainText('板宽 600')
+
+    const after = await page.locator('[data-view="front"]').evaluate((el) => {
+      const svg = el as SVGSVGElement
+      return { w: parseFloat(svg.style.width), box: svg.getAttribute('viewBox') }
+    })
+    // viewBox 内容宽缩到 1/5（600→120）；两端共 48mm padding 不参与缩放
+    const boxWBefore = parseFloat(before.box!.split(' ')[2]!)
+    const boxWAfter = parseFloat(after.box!.split(' ')[2]!)
+    expect(boxWAfter - 48).toBeCloseTo((boxWBefore - 48) / 5, 1)
+    expect(after.w).toBeCloseTo(boxWAfter, 1)
+
+    // 保存后回列表再打开，仍是 1:5
+    await page.getByTestId('save-plan').click()
+    await page.getByTestId('nav-home').click()
+    await page.getByTestId('plan-card').first().click()
+    await expect(page.getByTestId('editor-scale')).toHaveValue('1:5')
+    await expect(page.locator('[data-view="front"]')).toHaveAttribute('data-scale', '1:5')
+  })
+
+  test('打印页切到 1:2：按比例出图、比例校验尺替代 100mm 校验尺、模板页隐藏', async ({ page }) => {
+    await goto(page, '/#/new')
+    await page.getByTestId('kind-dovetail').click()
+    await page.getByTestId('create-plan').click()
+    await page.getByTestId('go-print').click()
+
+    await page.getByTestId('print-scale').selectOption('1:2')
+    await expect(page.getByTestId('do-print')).toContainText('1:2')
+    await expect(page.getByTestId('scale-ruler-1:2')).toBeVisible()
+    // 尺面代表实际 100mm，图上应只有 50mm
+    await expect(page.getByTestId('scale-ruler-1:2')).toContainText('50mm')
+    await expect(page.getByTestId('check-ruler')).toHaveCount(0)
+    await expect(page.getByText('1:1 模板页')).toHaveCount(0)
+    await expect(page.locator('[data-view="front"]')).toHaveAttribute('data-scale', '1:2')
+    await expect(page.locator('[data-view="front"]')).toContainText('板宽 200')
+
+    // 返回编辑器：打印页的比例选择已随方案存住
+    await page.getByRole('button', { name: '返回编辑' }).click()
+    await expect(page.getByTestId('editor-scale')).toHaveValue('1:2')
   })
 
   test('六种榫卯类型均可出图（类型切换联动）', async ({ page }) => {

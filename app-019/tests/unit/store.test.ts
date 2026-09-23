@@ -1,6 +1,6 @@
 // 方案库：导出/导入往返一致（蓝图 §10）+ 筛选 + 性能（重算 <100ms）
 import { describe, it, expect, beforeEach } from 'vitest'
-import { makePlan, exportJSON, importJSON, filterPlans, loadPlans, upsertPlan, deletePlan } from '../../src/store/plans'
+import { makePlan, exportJSON, importJSON, filterPlans, loadPlans, upsertPlan, deletePlan, getPlan } from '../../src/store/plans'
 import { computeJoint } from '../../src/lib/calc'
 import { buildViews } from '../../src/geometry/views'
 import { round01, round05, fmtDrawing, fmt01 } from '../../src/lib/format'
@@ -46,6 +46,50 @@ describe('方案库导出/导入', () => {
     expect(() =>
       importJSON(JSON.stringify({ id: 'x', title: 't', joints: [{ kind: 'dovetail' }] })),
     ).toThrow(/params/)
+  })
+
+  it('出图比例随方案存下，重新读取仍是那一档', () => {
+    const plan = makePlan('dovetail', {
+      boardA: { thickness: 18, width: 240 },
+      boardB: { thickness: 18, width: 240 },
+      wood: 'hardwood',
+      fit: 'standard',
+      dovetail: { angleRatio: 8 },
+      kerfMm: 1.1,
+    })
+    upsertPlan({ ...plan, scale: '1:5' })
+    expect(getPlan(plan.id)!.scale).toBe('1:5')
+  })
+
+  it('旧版本数据缺 scale 字段时回退 1:1', () => {
+    const plan = makePlan('dovetail', {
+      boardA: { thickness: 18, width: 240 },
+      boardB: { thickness: 18, width: 240 },
+      wood: 'hardwood',
+      fit: 'standard',
+      dovetail: { angleRatio: 8 },
+      kerfMm: 1.1,
+    })
+    const legacy = { ...plan } as Partial<typeof plan>
+    delete legacy.scale
+    localStorage.setItem('wjb.plans.v1', JSON.stringify([legacy]))
+    expect(loadPlans()[0]!.scale).toBe('1:1')
+  })
+
+  it('导入 JSON 里缺失/非法的 scale 归一化为 1:1', () => {
+    const plan = makePlan('dovetail', {
+      boardA: { thickness: 18, width: 240 },
+      boardB: { thickness: 18, width: 240 },
+      wood: 'hardwood',
+      fit: 'standard',
+      dovetail: { angleRatio: 8 },
+      kerfMm: 1.1,
+    })
+    const bad = { ...plan, scale: '2:1' }
+    expect(importJSON(JSON.stringify(bad)).scale).toBe('1:1')
+    const missing = { ...plan } as Partial<typeof plan>
+    delete missing.scale
+    expect(importJSON(JSON.stringify(missing)).scale).toBe('1:1')
   })
 
   it('按「榫卯类型 + 木料厚度」筛选', () => {

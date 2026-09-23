@@ -1,14 +1,14 @@
 // 图纸编辑器：左参数 | 中三视图 | 右切割步骤与提示（蓝图 §6）
 import { useMemo, useRef, useState } from 'react'
-import type { Drawing, JointKind, Params, Wood, Fit } from '../types'
-import { KIND_LABEL } from '../types'
+import type { Drawing, JointKind, Params, Scale, Wood, Fit } from '../types'
+import { KIND_LABEL, SCALE_OPTIONS } from '../types'
 import { computeJoint } from '../lib/calc'
-import { buildViews } from '../geometry/views'
+import { buildViews, scaleView } from '../geometry/views'
 import { buildCutList } from '../lib/cutlist'
 import { fmt01 } from '../lib/format'
 import { getPlan, upsertPlan, downloadJSON, deletePlan } from '../store/plans'
 import { navigate } from '../router'
-import { ViewSvg, CheckRuler } from '../components/ViewSvg'
+import { ViewSvg, CheckRuler, ScalePanel, svgMmWidth } from '../components/ViewSvg'
 import { ParamForm } from '../components/ParamForm'
 import { DEFAULT_FIT_TABLE, WOOD_LABEL, loadFitTable, saveFitTable, type FitTable } from '../lib/fit'
 
@@ -23,7 +23,7 @@ export function EditorPage({ id }: { id: string }) {
     if (!plan) return null
     const t0 = performance.now()
     const r = computeJoint(plan.joints[0])
-    const views = buildViews(plan.joints[0], r)
+    const views = buildViews(plan.joints[0], r).map((vm) => scaleView(vm, plan.scale))
     recalcMs.current = performance.now() - t0
     return { result: r, views, cut: buildCutList(plan.joints[0], r.dovetail, r.tenon) }
   }, [plan, savedTick])
@@ -49,6 +49,10 @@ export function EditorPage({ id }: { id: string }) {
   }
   const updateKind = (k: JointKind) => {
     setPlan((prev) => (prev ? { ...prev, joints: [{ ...prev.joints[0], kind: k }], updatedAt: Date.now() } : prev))
+    setDirty(true)
+  }
+  const updateScale = (s: Scale) => {
+    setPlan((prev) => (prev ? { ...prev, scale: s } : prev))
     setDirty(true)
   }
 
@@ -101,6 +105,22 @@ export function EditorPage({ id }: { id: string }) {
         </aside>
 
         <main className="col-views">
+          <div className="scale-bar">
+            <label htmlFor="editor-scale">出图比例</label>
+            <select
+              id="editor-scale"
+              data-testid="editor-scale"
+              value={plan.scale}
+              onChange={(e) => updateScale(e.target.value as Scale)}
+            >
+              {SCALE_OPTIONS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            <span className="note">
+              尺寸标注一律为实际尺寸；{plan.scale === '1:1' ? '1:1 可直接打印描线' : `${plan.scale} 仅按比例出图，描线请以标注尺寸为准`}
+            </span>
+          </div>
           {computed && computed.result.warnings.length > 0 && (
             <div className="warnings" role="alert" data-testid="warnings">
               {computed.result.warnings.map((w, i) => (
@@ -109,7 +129,8 @@ export function EditorPage({ id }: { id: string }) {
             </div>
           )}
           <div className="views" data-testid="views">
-            {computed?.views.map((vm) => <ViewSvg key={vm.id} vm={vm} />)}
+            {computed?.views.map((vm) => <ViewSvg key={vm.id} vm={vm} scale={plan.scale} />)}
+            <ScalePanel scale={plan.scale} />
           </div>
           <p className="note" data-testid="recalc-ms">重算耗时 {recalcMs.current.toFixed(1)}ms（要求 &lt;100ms）</p>
           {computed && joint.kind.startsWith('dovetail') && computed.result.dovetail && (
@@ -254,38 +275,60 @@ export function FitTableEditor() {
 }
 
 export function PrintPage({ id }: { id: string }) {
+  const [tick, setTick] = useState(0)
   const plan = getPlan(id)
   if (!plan) return <div className="page"><p className="error">方案不存在</p></div>
   const joint = plan.joints[0]
   const r = computeJoint(joint)
-  const views = buildViews(joint, r)
+  const views = buildViews(joint, r).map((vm) => scaleView(vm, plan.scale))
+  // tick 仅用于强制重读 localStorage：打印页改比例即时落库
+  void tick
+
+  const changeScale = (s: Scale) => {
+    upsertPlan({ ...plan, scale: s })
+    setTick((t) => t + 1)
+  }
+
   return (
     <div className="page print-page" data-testid="print-page">
       <div className="print-toolbar no-print">
+        <label htmlFor="print-scale">出图比例</label>
+        <select
+          id="print-scale"
+          data-testid="print-scale"
+          value={plan.scale}
+          onChange={(e) => changeScale(e.target.value as Scale)}
+        >
+          {SCALE_OPTIONS.map((s) => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
         <button className="btn btn-primary" data-testid="do-print" onClick={() => window.print()}>
-          打印（1:1）
+          打印（{plan.scale}）
         </button>
         <button className="btn" onClick={() => navigate(`/plan/${plan.id}`)}>返回编辑</button>
         <span className="note">打印前关闭「适应页面/缩放」，选择 A4、100% 缩放</span>
       </div>
       <h1 className="print-title">{plan.title}</h1>
       <section className="print-section">
-        <h2>校验尺</h2>
+        <h2>图纸（{plan.scale}，标注为实际尺寸）</h2>
         {views.map((vm) => (
           <div key={vm.id} className="print-view-block">
-            <ViewSvg vm={vm} widthMm={vm.contentW + 48} />
+            <ViewSvg vm={vm} scale={plan.scale} widthMm={svgMmWidth(vm)} />
           </div>
         ))}
         <div className="print-view-block">
-          <CheckRuler />
+          {plan.scale === '1:1' ? <CheckRuler /> : <ScalePanel scale={plan.scale} />}
         </div>
       </section>
-      <section className="print-section">
-        <h2>1:1 模板页（剪下贴在木料上描线）</h2>
-        <div className="print-view-block">
-          {views[0] && <ViewSvg vm={views[0]} widthMm={views[0].contentW + 48} />}
-        </div>
-      </section>
+      {plan.scale === '1:1' && (
+        <section className="print-section">
+          <h2>1:1 模板页（剪下贴在木料上描线）</h2>
+          <div className="print-view-block">
+            {views[0] && <ViewSvg vm={views[0]} scale="1:1" widthMm={svgMmWidth(views[0])} />}
+          </div>
+        </section>
+      )}
       <section className="print-section">
         <h2>切割步骤</h2>
         <CutSteps cut={buildCutList(joint, r.dovetail, r.tenon)} />

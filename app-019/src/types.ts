@@ -53,6 +53,16 @@ export interface Part {
 
 export type Scale = '1:1' | '1:2' | '1:5'
 
+export const SCALE_OPTIONS: Scale[] = ['1:1', '1:2', '1:5']
+
+/** 图上长度 / 实际长度（图纸上 1mm 代表多少实际 mm） */
+export const SCALE_FACTOR: Record<Scale, number> = { '1:1': 1, '1:2': 1 / 2, '1:5': 1 / 5 }
+
+/** 归一化：旧数据/导入数据里缺失或非法的 scale 一律回退 1:1 */
+export function normalizeScale(s: unknown): Scale {
+  return (SCALE_OPTIONS as string[]).includes(s as string) ? (s as Scale) : '1:1'
+}
+
 export interface Drawing {
   id: string
   title: string

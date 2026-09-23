@@ -1,13 +1,16 @@
 // 方案库：localStorage 持久化 + 导出/导入 JSON
 import type { Drawing, JointKind, Joint, Params } from '../types'
-import { KIND_LABEL } from '../types'
+import { KIND_LABEL, normalizeScale } from '../types'
 
 const KEY = 'wjb.plans.v1'
 
 export function loadPlans(): Drawing[] {
   try {
     const raw = localStorage.getItem(KEY)
-    return raw ? (JSON.parse(raw) as Drawing[]) : []
+    const plans = raw ? (JSON.parse(raw) as Drawing[]) : []
+    // 旧版本方案没有 scale 字段：回退 1:1，保证打开后仍可切换并随下次保存固化
+    for (const p of plans) p.scale = normalizeScale(p.scale)
+    return plans
   } catch {
     return []
   }
@@ -62,7 +65,7 @@ export function importJSON(text: string): Drawing {
   if (!j.kind || !j.params) throw new Error('joints[0] 缺少 kind/params')
   const p = j.params as Params
   if (!p.boardA?.thickness || !p.boardA?.width) throw new Error('params.boardA 尺寸缺失')
-  return obj as Drawing
+  return { ...(obj as Drawing), scale: normalizeScale((obj as Partial<Drawing>).scale) }
 }
 
 export function downloadJSON(plan: Drawing): void {
